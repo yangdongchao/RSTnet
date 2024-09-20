@@ -34,6 +34,9 @@ The detail please refer to MimiCodec part. The paper gives a lot of useful trick
 - [x] not applying quantization with a certain probability during training
 - [x] Semantic guidance
 
+## Moshi LM
+The details will be updated in the following days.
+
 ## Reference
 The implements of audio codec and hierarchical LM are based on previous codebase:
 https://github.com/yangdongchao/AcademiCodec 
