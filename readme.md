@@ -1,5 +1,8 @@
 <img src="moshi.png" width="400px"></img>
 
+# News
+- [x] 2024.9.28: I find the pre-trained Moshi can be successfully load and full-parameter finetuning training with our training framework. In the following, I will collect some new conversational dataset to fine-tune it. All of the checkpoints and training code will be open-sourced. 
+
 # Reproduce the training process of Moshi
 
 Pytorch implementation of [Moshi](https://kyutai.org/Moshi.pdf), "Moshi: a speech-text foundation model for real-time dialogue", from Kyutai Lab.
