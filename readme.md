@@ -1,19 +1,24 @@
-<img src="moshi.png" width="400px"></img>
+<img src="RSTnet.png"></img>
 
-# News
-- [x] 2024.10.7 
 
-# Reproduce the training process of Moshi
+# RSTnet: Real-time Speech-Text Foundation Model Toolkit
+Building a real-time speech-text foundation model capable of understanding and generating speech has garnered significant attention. Notable examples of such models include ChatGPT-4o and Moshi. However, challenges in training these models continue to persist in the research community. We introduce RSTnet, a new open-source platform designed for developing real-time speech-text foundation models. RSTnet offers a comprehensive framework for data processing, pre-training, and fine-tuning, aimed at helping researchers build their real-time speech-text models efficiently. It builds upon previous works, such as the real-time spoken dialogue model (Moshi) and the universal audio generation model (UniAudio). RSTnet consists of following key components: (1) Data preparation; (2) streaming audio codec models; (3) speech-text foundation models; (4) Benchmark and Evaluation.
 
-Pytorch implementation of [Moshi](https://kyutai.org/Moshi.pdf), "Moshi: a speech-text foundation model for real-time dialogue", from Kyutai Lab.
+## News
+- [x] 2024.10.7. We release the first version of RSTnet.
 
-In this repo, we will try to reproduce the training process of Moshi, including their audio codec (Mimi), and their hierarchical LM for text and audio.
+## Make Contributions
+The project is still ongoing. If you have interest about RSTnet, welcome to make contribution. You can consider:
+- [1] Propose issue or PR to solve the bugs
+- [2] Propose more idea about Data collection, streaming codec, and speech-text foundation model
+- [3] Join us as an author of this project. (Contact me by dcyang@se.cuhk.edu.hk)
+
 
 ## Install
 
 ```
-conda create -n open-moshi python=3.12
-conda activate open-moshi
+conda create -n RSTnet python=3.12
+conda activate RSTnet
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install tqdm
 pip install librosa==0.9.1
@@ -22,33 +27,36 @@ pip install omegaconf
 pip install einops
 pip install vector_quantize_pytorch
 pip install tensorboard
-
+pip install deepspeed
+pip install peft
 ```
 
-## Plan
-- [x] Release the training code of Mimi codec
-- [ ] Release the first version training code of hierarchical LM for text and audio modeling
-- [ ] Release the final version training code of hierarchical LM for text and audio modeling
+## Technical report
+You can find our technical report from https://github.com/yangdongchao/RSTnet/blob/main/RSTnet.pdf
 
-## MimiCodec
-The detail please refer to MimiCodec part. The paper gives a lot of useful tricks during training. All of these tricks has been used in our reproduced version, including:
-- [x] Removing reconstruction loss
-- [x] High compression rate (12.5hz)
-- [x] not applying quantization with a certain probability during training
-- [x] Semantic guidance
+## DataPipeline
+More details will be updated soon. You can refer to DataPipeline part.
 
-## Moshi LM
-The details will be updated in the following days.
+## AudioCodec
+We plan to support more SOTA streaming audio codec. Now, we have reproduced the MimiCodec.
+
+## Multi-modal LLM
+We release the fine-tuning code for moshi now. In the next step, we will release the full recipes about pre-training, post-training. Furthermore, we also consider to add other SOTA speech-text foundation paradigms. 
 
 ## Reference
-The implements of audio codec and hierarchical LM are based on previous codebase:
-https://github.com/yangdongchao/AcademiCodec 
-https://github.com/yangdongchao/LLM-Codec
-https://github.com/yangdongchao/UniAudio
+The implements of streaming audio codec and speech-text language models are based on previous codebase:
 https://github.com/kyutai-labs/moshi
+https://github.com/yangdongchao/UniAudio
 
 ## Citations
-
+```bibtex
+@techreport{RSTnet,
+  title={RSTnet: Real-time Speech-Text Foundation Model Toolkit},
+  author={RSTnet team},
+  journal={Technical report},
+  year={2024}
+}
+```
 ```bibtex
 @techreport{kyutai2024moshi,
     author = {Alexandre D\'efossez and Laurent Mazar\'e and Manu Orsini and Am\'elie Royer and
@@ -60,13 +68,6 @@ https://github.com/kyutai-labs/moshi
     url={http://kyutai.org/Moshi.pdf},
 }
 ```
-```bibtex
-@article{yang2023hifi,
-  title={HiFi-Codec: Group-residual Vector quantization for High Fidelity Audio Codec},
-  author={Yang, Dongchao and Liu, Songxiang and Huang, Rongjie and Tian, Jinchuan and Weng, Chao and Zou, Yuexian},
-  journal={arXiv preprint arXiv:2305.02765},
-  year={2023}
-}
 ```
 ```bibtex
 @article{yang2023uniaudio,
@@ -76,3 +77,5 @@ https://github.com/kyutai-labs/moshi
   year={2023}
 }
 ```
+
+
