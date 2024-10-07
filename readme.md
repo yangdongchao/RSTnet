@@ -1,7 +1,7 @@
 <img src="moshi.png" width="400px"></img>
 
 # News
-- [x] 2024.9.28: I find the pre-trained Moshi can be successfully load and full-parameter finetuning training with our training framework. In the following, I will collect some new conversational dataset to fine-tune it. All of the checkpoints and training code will be open-sourced. 
+- [x] 2024.10.7 
 
 # Reproduce the training process of Moshi
 
