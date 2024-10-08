@@ -15,7 +15,71 @@ import torch
 from torch import nn
 from torch import distributed
 import torch.nn.functional as F
+import torch.distributed as dist
 
+class SyncFunction(torch.autograd.Function):
+    @staticmethod
+    # @torch.no_grad()
+    def forward(ctx, tensor):
+        ctx.batch_size = tensor.shape[0]
+
+        gathered_tensor = [torch.zeros_like(tensor) for _ in range(torch.distributed.get_world_size())]
+
+        torch.distributed.all_gather(gathered_tensor, tensor)
+        gathered_tensor = torch.cat(gathered_tensor, 0)
+
+        return gathered_tensor
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = grad_output.clone()
+        torch.distributed.all_reduce(grad_input, op=torch.distributed.ReduceOp.SUM, async_op=False)
+
+        idx_from = torch.distributed.get_rank() * ctx.batch_size
+        idx_to = (torch.distributed.get_rank() + 1) * ctx.batch_size
+        return grad_input[idx_from:idx_to]
+
+def _is_complex_or_float(tensor):
+    return torch.is_floating_point(tensor) or torch.is_complex(tensor)
+
+def all_reduce(tensor: torch.Tensor, op=torch.distributed.ReduceOp.SUM):
+    if _is_distributed():
+        return torch.distributed.all_reduce(tensor, op)
+
+def world_size():
+    if torch.distributed.is_initialized():
+        return torch.distributed.get_world_size()
+    else:
+        return 1
+
+def _check_number_of_params(params: tp.List[torch.Tensor]):
+    # utility function to check that the number of params in all workers is the same,
+    # and thus avoid a deadlock with distributed all reduce.
+    if not _is_distributed() or not params:
+        return
+    #print('params[0].device ', params[0].device)
+    tensor = torch.tensor([len(params)], device=params[0].device, dtype=torch.long)
+    all_reduce(tensor)
+    if tensor.item() != len(params) * world_size():
+        # If not all the workers have the same number, for at least one of them,
+        # this inequality will be verified.
+        raise RuntimeError(f"Mismatch in number of params: ours is {len(params)}, "
+                           "at least one worker has a different one.")
+
+def broadcast_tensors(tensors: tp.Iterable[torch.Tensor], src: int = 0):
+    """Broadcast the tensors from the given parameters to all workers.
+    This can be used to ensure that all workers have the same model to start with.
+    """
+    if not _is_distributed():
+        return
+    tensors = [tensor for tensor in tensors if _is_complex_or_float(tensor)]
+    _check_number_of_params(tensors)
+    handles = []
+    for tensor in tensors:
+        handle = torch.distributed.broadcast(tensor.data, src=src, async_op=True)
+        handles.append(handle)
+    for handle in handles:
+        handle.wait()
 
 class _CodebookForwardResult(tp.NamedTuple):
     quantized: torch.Tensor
@@ -69,154 +133,223 @@ def zero_scalar(device) -> torch.Tensor:
     """Returns a 0. value on the given device without introducing a synchronization point."""
     return torch.zeros([1], device=device)[0]
 
+def sample_vectors(samples, num: int):
+    num_samples, device = samples.shape[0], samples.device
+
+    if num_samples >= num:
+        indices = torch.randperm(num_samples, device=device)[:num]
+    else:
+        indices = torch.randint(0, num_samples, (num,), device=device)
+
+    return samples[indices]
+
+
+def kmeans(samples, num_clusters: int, num_iters: int = 10, frames_to_use: int = 10_000):
+    """ Run K-means clustering on samples.
+    Args:
+        samples (tensor): shape [B * T, D]
+        num_clusters (int): number of centroids.
+        num_iters (int): number of iterations.
+    """
+    dim, dtype = samples.shape[-1], samples.dtype
+
+    if frames_to_use < samples.shape[0]:
+        samples = sample_vectors(samples, frames_to_use)
+
+    # Init means
+    means = sample_vectors(samples, num_clusters)
+
+    for _ in range(num_iters):
+        diffs = rearrange(samples, "n d -> n () d") - rearrange(
+            means, "c d -> () c d"
+        )
+        dists = -(diffs ** 2).sum(dim=-1)
+
+        buckets = dists.max(dim=-1).indices
+        bins = torch.bincount(buckets, minlength=num_clusters)
+        zero_mask = bins == 0
+        bins_min_clamped = bins.masked_fill(zero_mask, 1)
+
+        new_means = buckets.new_zeros(num_clusters, dim, dtype=dtype)
+        new_means.scatter_add_(0, repeat(buckets, "n -> n d", d=dim), samples)
+        new_means = new_means / bins_min_clamped[..., None]
+
+        means = torch.where(zero_mask[..., None], means, new_means)
+
+    return means, bins
+
 
 class EuclideanCodebook(nn.Module):
     """Codebook with Euclidean distance.
-
     Args:
         dim (int): Dimension.
         codebook_size (int): Codebook size.
+        kmeans_init (bool): Whether to use k-means to initialize the codebooks.
+            If set to true, run the k-means algorithm on the first training batch and use
+            the learned centroids as initialization.
+        kmeans_iters (int): Number of iterations used for k-means algorithm at initialization.
         decay (float): Decay for exponential moving average over the codebooks.
         epsilon (float): Epsilon value for numerical stability.
-        threshold_usage_ratio (float): Defines the threshold for the cluster usage under which a centroid
-            is replaced. This is expressed as a fraction of the usage a centroid would get under
-            a uniform distribution, so that it doesn't depend on the batch size etc.
-        replaced_usage_ratio (float): When replacing a centroid, use this as an initial centroid usage,
-            to avoid the centroid getting replaced too quickly.
-        check_unused_every (int): Check for unused centroids every `check_unused_every` iterations.
-            This is to avoid too many synchronization points.
-
-    Buffers:
-        cluster_usage (torch.Tensor): EMA of the cluster usage per batch, e.g. this will
-            be dependent on the batch size etc.
-        embedding_sum (torch.Tensor): EMA of the sum of the assigned points to each cluster.
-            In particular, this can be normalized by `cluster_usage` to obtain the
-            actual cluster centroids.
+        threshold_ema_dead_code (int): Threshold for dead code expiration. Replace any codes
+            that have an exponential moving average cluster size less than the specified threshold with
+            randomly selected vector from the current batch.
     """
-
     def __init__(
         self,
         dim: int,
         codebook_size: int,
+        kmeans_init: int = False,
+        kmeans_iters: int = 50,
         decay: float = 0.99,
         epsilon: float = 1e-5,
-        threshold_usage_ratio: float = 0.1,
-        replaced_usage_ratio: float = 1.0,
-        check_unused_every: int = 5,
+        replaced_usage_ratio: float = 0.1,
+        threshold_ema_dead_code: int = 2,
     ):
         super().__init__()
         self.decay = decay
-        embedding = torch.zeros(codebook_size, dim)
+        init_fn: tp.Union[tp.Callable[..., torch.Tensor], tp.Any] = _uniform_init if not kmeans_init else torch.zeros
+        embed = init_fn(codebook_size, dim)
 
-        self.dim = dim
         self.codebook_size = codebook_size
 
+        self.kmeans_iters = kmeans_iters
         self.epsilon = epsilon
-        self.threshold_usage_ratio = threshold_usage_ratio
-        self.replaced_usage_ratio = replaced_usage_ratio
-        self.check_unused_every = check_unused_every
-        self._next_unused_check = check_unused_every
+        self.threshold_ema_dead_code = threshold_ema_dead_code
+        
+        # Flag variable to indicate whether the codebook is initialized
+        self.register_buffer("inited", torch.Tensor([not kmeans_init]))
+        # Runing EMA cluster size/count: N_i^t in eq. (6) in vqvae paper
+        self.register_buffer("cluster_size", torch.zeros(codebook_size))
+        # Codebook
+        self.register_buffer("embed", embed)
+        # EMA codebook: eq. (7) in vqvae paper
+        self.register_buffer("embed_avg", embed.clone())
 
-        self.register_buffer("_initialized", torch.tensor([False], dtype=torch.float))
-        self.register_buffer("cluster_usage", torch.ones(codebook_size))
-        self.register_buffer("embedding_sum", embedding)
-        self.register_buffer("_embedding", None, persistent=False)
-        self._cached_initialized = False
+    @torch.jit.ignore
+    def init_embed_(self, data):
+        """ Initialize codebook.
+        Args:
+            data (tensor): [B * T, D].
+        """
+        if self.inited:
+            return
+        
+        if dist.is_available() and dist.is_initialized():
+            # [B * T * world_size, D]
+            data = SyncFunction.apply(data)
 
-    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs) -> None:
-        # Mapping old names to new names
-        mappings = {
-            "inited": "_initialized",
-            "cluster_size": "cluster_usage",
-            "embed_avg": "embedding_sum",
-            "embed_sum": "embedding_sum",
-        }
-        for old_name, new_name in mappings.items():
-            old_name = prefix + old_name
-            if old_name in state_dict:
-                value = state_dict.pop(old_name)
-                if new_name is not None:
-                    state_dict[prefix + new_name] = value
-        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+        embed, cluster_size = kmeans(data, self.codebook_size, self.kmeans_iters)
+        self.embed.data.copy_(embed)
+        self.embed_avg.data.copy_(embed.clone())
+        self.cluster_size.data.copy_(cluster_size)
+        self.inited.data.copy_(torch.Tensor([True]))
+        # Make sure all buffers across workers are in sync after initialization
+        broadcast_tensors(self.buffers())
 
-    @property
-    def embedding(self) -> torch.Tensor:
-        if self._embedding is None:
-            embedding = (
-                self.embedding_sum / self.cluster_usage.clamp(min=self.epsilon)[:, None]
-            )
-            self.register_buffer("_embedding", embedding, persistent=False)
-            return embedding
-        return self._embedding
+    def replace_(self, samples, mask):
+        modified_codebook = torch.where(
+            mask[..., None], sample_vectors(samples, self.codebook_size), self.embed
+        )
+        self.embed.data.copy_(modified_codebook)
 
-    def _broadcast_buffers(self) -> None:
+    def expire_codes_(self, batch_samples):
+        if self.threshold_ema_dead_code == 0:
+            return
+
+        expired_codes = self.cluster_size < self.threshold_ema_dead_code
+        if not torch.any(expired_codes):
+            return
+
+        # if is_primary():
+            # print(batch_samples.shape)
+
+        ## NOTE (snippet added by Songxiang Liu): gather data from all gpus
         if _is_distributed():
-            for buffer in self.buffers():
-                distributed.broadcast(buffer, 0)
+            # [B * T * world_size, D]
+            batch_samples = SyncFunction.apply(batch_samples)
 
-    def _replace_expired_codes(self, samples: torch.Tensor, mask: torch.Tensor) -> None:
-        # Replaces expired centroids, as indicated by `mask` (a true value indicate the code needs to be replaced).
-        # The new codes are sampled from the batch `samples`.
-        new_vectors = _sample_vectors(samples, self.codebook_size)
-        replace_cluster_usage = (
-            self.replaced_usage_ratio * self.cluster_usage.sum() / self.codebook_size
-        )
-        self.embedding_sum[:] = torch.where(
-            mask[:, None], replace_cluster_usage * new_vectors, self.embedding_sum
-        )
-        self.cluster_usage[:] = torch.where(
-            mask, replace_cluster_usage, self.cluster_usage
-        )
+        # if is_primary():
+            # print(batch_samples.shape)
 
-    def _reshape_input(self, x: torch.Tensor) -> torch.Tensor:
-        # Flattens all the dimensions but the last one, e.g. return a vector of shape `[N, D]`.
+        batch_samples = rearrange(batch_samples, "... d -> (...) d")
+        self.replace_(batch_samples, mask=expired_codes)
+        broadcast_tensors(self.buffers())
+
+    def preprocess(self, x):
         x = rearrange(x, "... d -> (...) d")
         return x
 
-    def _reshape_codes(self, codes: torch.Tensor, shape: torch.Size) -> torch.Tensor:
-        return codes.view(*shape[:-1])
+    def quantize(self, x):
+        embed = self.embed.t()
+        dist = -(
+            x.pow(2).sum(1, keepdim=True)
+            - 2 * x @ embed
+            + embed.pow(2).sum(0, keepdim=True)
+        )
+        embed_ind = dist.max(dim=-1).indices
+        return embed_ind
 
-    def _quantize(self, x: torch.Tensor) -> torch.Tensor:
-        # Projects each vector in `x` over the nearest centroid and return its index.
-        # `x` should be `[N, D]` with `N` the number of input vectors and `D` the dimension.
-        assert x.dim() == 2
-        dists = torch.cdist(x[None], self.embedding[None], p=2)[0]
-        codes = dists.argmin(dim=-1)
-        return codes
+    def postprocess_emb(self, embed_ind, shape):
+        return embed_ind.view(*shape[:-1])
 
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
-        """Given a tensor `x` of shape `[*, D]`, returns a tensor of integer codes of shape `[*]`.
-        The codes are defined as the indexes of the centroids nearest to each vector in `x`.
-        """
-        assert x.dtype.is_floating_point, f"Input should be floats, got {x.dtype}"
+    def dequantize(self, embed_ind):
+        quantize = F.embedding(embed_ind, self.embed)
+        return quantize
+
+    def encode(self, x):
         shape = x.shape
-        x = self._reshape_input(x)
-        codes = self._quantize(x)
-        codes = self._reshape_codes(codes, shape)
-        return codes
+        # pre-process
+        x = self.preprocess(x) # [B, T, D] -> [B*T, D]
+        # quantize
+        embed_ind = self.quantize(x)
+        # post-process
+        embed_ind = self.postprocess_emb(embed_ind, shape)
+        return embed_ind
 
-    def decode(self, codes: torch.Tensor) -> torch.Tensor:
-        """Given a tensor of codes of shape `[*]`, returns a tensor of shape `[*, D]`,
-        corresponding to the centroids associated to each code index.
-        """
-        assert (
-            not codes.dtype.is_floating_point
-        ), f"Codes should be integers, got {codes.dtype}"
-        quantized = F.embedding(codes, self.embedding)
-        return quantized
+    def decode(self, embed_ind):
+        quantize = self.dequantize(embed_ind)
+        return quantize
 
-    def forward(
-        self, x: torch.Tensor, initialize: bool = True
-    ) -> _CodebookForwardResult:
-        shape = x.shape
-        x = self._reshape_input(x)
+    def forward(self, x, initialize=True):
+        # shape: [B, T, D]
+        shape, dtype = x.shape, x.dtype
+        x = self.preprocess(x) # [B, T, D] -> [B*T, D]
+        
+        # Initialize codebook
+        self.init_embed_(x)
 
-        flat_codes = self._quantize(x)
-        codes = self._reshape_codes(flat_codes, shape)
-        quantized = self.decode(codes)
+        embed_ind = self.quantize(x) # [B*T,]
+        embed_onehot = F.one_hot(embed_ind, self.codebook_size).type(dtype) # [B*T, cb-size]
+        embed_ind = self.postprocess_emb(embed_ind, shape) # [B, T]
+        quantize = self.dequantize(embed_ind) # [B, T, D]
+
+        if self.training:
+            ### Update codebook by EMA
+            embed_onehot_sum = embed_onehot.sum(0) # [cb-size,]
+            embed_sum = x.t() @ embed_onehot # [D, cb-size]
+            if _is_distributed():
+                dist.all_reduce(embed_onehot_sum)
+                dist.all_reduce(embed_sum)
+            # Update ema cluster count N_i^t, eq. (6) in vqvae paper
+            self.cluster_size.data.mul_(self.decay).add_(
+                embed_onehot_sum, alpha=1 - self.decay
+            )
+            # Update ema embed: eq. (7) in vqvae paper
+            self.embed_avg.data.mul_(self.decay).add_(embed_sum.t(), alpha=1 - self.decay)
+            # apply laplace smoothing
+            n = self.cluster_size.sum()
+            cluster_size = (
+                (self.cluster_size + self.epsilon) / (n + self.codebook_size * self.epsilon) * n
+            )
+            # Update ema embed: eq. (8) in vqvae paper
+            embed_normalized = self.embed_avg / cluster_size.unsqueeze(1)
+            self.embed.data.copy_(embed_normalized)
+
+            # We do the expiry of code at that point as buffers are in sync
+            # and all the workers will take the same decision.
+            self.expire_codes_(x)
         metrics: tp.Dict[str, torch.Tensor] = {}
-
-        return _CodebookForwardResult(quantized, codes, metrics)
+        return _CodebookForwardResult(quantize, embed_ind, metrics)
 
 
 class VectorQuantization(nn.Module):
@@ -265,14 +398,13 @@ class VectorQuantization(nn.Module):
             codebook_size=codebook_size,
             decay=decay,
             epsilon=epsilon,
-            threshold_usage_ratio=threshold_usage_ratio,
             **kwargs,
         )
         self.codebook_size = codebook_size
 
     @property
     def embedding(self):
-        return self._codebook.embedding
+        return self._codebook.embed # 
 
     def _rearrange_input(self, x):
         x = rearrange(x, "b d n -> b n d")

@@ -111,6 +111,7 @@ training_file: train.scp
 validation_file: val.scp
 semantic_model_path: WavLM-Large.pt
 
+
 seed: 2333
 cudnn_deterministic: false
 tensorboard: true # whether to use tensorboard
