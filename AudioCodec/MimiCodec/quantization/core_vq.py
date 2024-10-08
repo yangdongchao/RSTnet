@@ -301,7 +301,8 @@ class VectorQuantization(nn.Module):
         quantized, codes, metrics = self._codebook(x, initialize=initialize)
 
         loss = zero_scalar(x.device)
-
+        if self.training: # add for training. copy the gradient
+            quantized = x + (quantized - x).detach()
         quantized = self.project_out(quantized)
         quantized = self._rearrange_output(quantized)
 
@@ -345,10 +346,14 @@ class ResidualVectorQuantization(nn.Module):
                 residual, initialize=previous_layer_is_initialized
             )
 
-            quantized = quantized.detach()
-            residual = residual - quantized
-            quantized_out = quantized_out + quantized
-
+            if self.training:
+                residual = residual - quantized 
+                quantized_out = quantized_out + quantized
+            else:
+                quantized = quantized.detach() # remove for training
+                residual = residual - quantized
+                quantized_out = quantized_out + quantized
+            
             all_codes.append(codes)
             all_losses.append(loss)
 
