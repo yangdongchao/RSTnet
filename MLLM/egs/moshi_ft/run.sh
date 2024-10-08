@@ -1,4 +1,4 @@
-stage=6
+stage=1
 stop_stage=6
 ngpu=4  # how many GPUs, you want to use to train the model
 
@@ -10,21 +10,16 @@ sr=true
 se=true
 
 # Dataset paths
-db_root="/mnt/Corpus-Upload/fisher/sph"
-processed_root="exp_data/expresso_processed"
-ckpt_root="/mnt/users/hccl.local/jkzhao/data/exp"
+db_root="/path/to/your/dataset"
+processed_root="exp_data/processed"
+ckpt_root="exp"
+aero_root="/path/to/aero"
 valid_prop=0.1
-tag="test"
+tag="fisher_ft"
 
-# export CUDA_VISIBLE_DEVICES=0,3
-# export CUDA_VISIBLE_DEVICES=2,3
-# available_gpus=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
-# GPU_PER_NODE_COUNT=$available_gpus
-# [[ -z "$MASTER_ADDR" ]] && MASTER_ADDR=localhost
-# [[ -z "$NODE_RANK" ]] && NODE_RANK=0
-# [[ -z "$MASTER_PORT" ]] && MASTER_PORT=9500
-# NODE_COUNT=1
-# echo "Available GPUs: $available_gpus"
+export CUDA_VISIBLE_DEVICES=0,1
+available_gpus=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
+echo "Available GPUs: $available_gpus"
 
 # training config
 seed=999
@@ -52,34 +47,53 @@ wav_scp=data/wav.scp
 train_scp=data/"$train_set"/wav.scp; [[ -f "$train_scp" ]] && rm $train_scp
 val_scp=data/"$valid_set"/wav.scp; [[ -f "$val_scp" ]] && rm $val_scp
 
-# source activate moshi-data
+# conda activate moshi-data
 # Prepare data following Espnet and split
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     echo "Prepare Fisher dataset"
     # STEP 0: please download the Fisher English Training Speech Part 1 and Part 2 from LDC
 
-    # # STEP 1: Untar dataset
-    # cat ${db_root}/fisher_eng_tr_sp_LDC2004S13.zip* > ${db_root}/fisher_eng_tr_sp_LDC2004S13.zip
-    # unzip ${db_root}/fisher_eng_tr_sp_LDC2004S13.zip
+    # STEP 1: Untar dataset
+    if [ ! -f ${db_root}/.p1_untar_finished ]; then
+        if [ ! -f ${db_root}/fisher_eng_tr_sp_LDC2004S13.zip.001 ]; then
+            echo "Please download the Fisher English Training Speech Part 1 from LDC and put it in ${db_root}"
+            exit 1
+        fi
+        cat ${db_root}/fisher_eng_tr_sp_LDC2004S13.zip.* > ${db_root}/fisher_eng_tr_sp_LDC2004S13.zip
+        unzip ${db_root}/fisher_eng_tr_sp_LDC2004S13.zip -d ${db_root}
+        touch ${db_root}/.p1_untar_finished
+    fi
 
-    # cat ${db_root}/fe_03_p2_LDC2005S13.zip* > ${db_root}/fe_03_p2_LDC2005S13.zip
-    # unzip ${db_root}/fe_03_p2_LDC2005S13.zip
+    if [ ! -f ${db_root}/.p2_untar_finished ]; then
+        if [ ! -f ${db_root}/fe_03_p2_LDC2005S13.zip.001 ]; then
+            echo "Please download the Fisher English Training Speech Part 2 from LDC and put it in ${db_root}"
+            exit 1
+        fi
+        cat ${db_root}/fe_03_p2_LDC2005S13.zip* > ${db_root}/fe_03_p2_LDC2005S13.zip
+        unzip ${db_root}/fe_03_p2_LDC2005S13.zip -d ${db_root}
+        touch ${db_root}/.p2_untar_finished
+    fi
 
     # STEP 2: Convert sph to wav
-    find "${db_root}" -type f -name "*.sph" | while read -r sph_file; do
-        echo "Processing ${sph_file}"
-        wav_file="${sph_file%.sph}.wav"
-        # Follow https://github.com/robd003/sph2pipe to install sph2pipe, and add it to PATH
-        sph2pipe -f wav "${sph_file}" "${sph_file%.sph}.wav"
-        rm "${sph_file}"
-    done
-    # Prepare wav.scp
+    if [ ! -f ${db_root}/.sph2wav_finished ]; then
+        find "${db_root}" -type f -name "*.sph" | while read -r sph_file; do
+            echo "Processing ${sph_file}"
+            wav_file="${sph_file%.sph}.wav"
+            # Follow https://github.com/robd003/sph2pipe to install sph2pipe, and add it to PATH
+            sph2pipe -f wav "${sph_file}" "${sph_file%.sph}.wav"
+        done
+        # Remove .sph files
+        find "${db_root}" -type f -name "*.sph" -delete
+        touch ${db_root}/.sph2wav_finished
+    fi
+
+    # STEP 3: Prepare wav.scp
     find "${db_root}" -type f -name "*.wav" | while read -r wav_file; do
         id=$(basename $wav_file .wav)
         echo "$id $wav_file" >> $wav_scp
     done
 
-    # STEP 3: Split validation set
+    # STEP 4: Split validation set
     # Randomly select 10% of the lines from wav_scp for validation set
     total_lines=$(wc -l < "$wav_scp")
     val_lines=$(printf "%.0f" "$(echo "$total_lines * $valid_prop" | bc)")  # int($total_lines * $valid_prop)
@@ -107,80 +121,86 @@ fi
 # Data Preprocessing
 # We use relative path in wav.scp
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
-    # VAD & ASR
-    # This will yield wav_seg.JOB.scp and utt2json
-    # echo "Preprocess: VAD & ASR with whisperx"
+    # VAD
+    # Please prepare your huggingface token in advance
+    echo "Preprocess: VAD with pyannote"
     for part in $test_sets $valid_set $train_set; do
-        utils/run.pl JOB=1:$ngpu  data/${part}/${ngpu}splits/log/asr.JOB.log \
-        python local/asr_segment.py \
+        utils/run.pl JOB=1:$ngpu  data/${part}/${ngpu}splits/log/vad.JOB.log \
+        python local/vad_segment.py \
             --rank JOB \
             --input-file data/${part}/${ngpu}splits/wav.JOB.scp \
             --audio-input-dir "${db_root}" \
-            --audio-output-dir "${processed_root}/audio" \
+            --output-file data/${part}/${ngpu}splits/wav_vad.JOB.scp \
+            --audio-output-dir "${processed_root}/audio"
+    done
+
+    # ASR
+    # This will yield wav_asr.JOB.scp and utt2json
+    echo "ASR with whisperX"
+    for part in $test_sets $valid_set $train_set; do
+        utils/run.pl JOB=1:$ngpu  data/${part}/${ngpu}splits/log/asr.JOB.log \
+        python local/asr_whisperx.py \
+            --rank JOB \
+            --input-file data/${part}/${ngpu}splits/wav_vad.JOB.scp \
+            --audio-input-dir "${processed_root}"/audio \
+            --output-file data/${part}/${ngpu}splits/wav_asr.JOB.scp \
             --metadata-output-dir "${processed_root}/metadata"
     done
     
-    # # SR
-    # if [ "${sr}" = true ]; then
-    #     echo "Preprocess: SR with AudioSR"
-    #     for part in $test_sets $valid_set $train_set; do
-    #         # Extract audio paths from wav_seg.JOB.scp to wav_seg.JOB.lst
-    #         for n in `seq 1 $ngpu`; do
-    #             while IFS= read -r line; do
-    #                 audio_path=$(echo "$line" | awk '{print $NF}')
-    #                 echo "${processed_root}/audio/${audio_path}" >> \
-    #                     data/${part}/${ngpu}splits/wav_seg.${n}.lst
-    #             done < data/${part}/${ngpu}splits/wav_seg.${n}.scp
-    #         done
+    # SR
+    if [ "${sr}" = true ]; then
+        echo "Preprocess: SR with AERO"
+        for part in $test_sets $valid_set $train_set; do
+            # Extract audio paths from wav_seg.JOB.scp to wav_seg.JOB.lst
+            for n in `seq 1 $ngpu`; do
+                if [ ! -f data/${part}/${ngpu}splits/wav_asr.${n}.lst ]; then
+                    while IFS= read -r line; do
+                        audio_path=$(echo "$line" | awk '{print $NF}')
+                        echo $audio_path >> \
+                            data/${part}/${ngpu}splits/wav_asr.${n}.lst
+                    done < data/${part}/${ngpu}splits/wav_asr.${n}.scp
+                fi
+            done
 
-    #         # AudioSR output ruins the original file strcutre, 
-    #         # so we output results to cache
-    #         temp_dir="${processed_root}/cache"
-    #         mkdir -p "${temp_dir}"
-    #         utils/run.pl JOB=1:$ngpu  data/${part}/${ngpu}splits/log/sr.JOB.log \
-    #         bash local/sr.sh \
-    #             -il "data/${part}/${ngpu}splits/wav_seg.JOB.lst" \
-    #             -s "${temp_dir}" \
-    #             --suffix "" \
-    #             --device JOB \
-    #             --ngpus $available_gpus
+            utils/run.pl JOB=1:$ngpu  data/${part}/${ngpu}splits/log/sr.JOB.log \
+            python ${aero_root}/batch_inference.py \
+                dset=debug \
+                experiment=aero_8-24_512_64 \
+                +rank=JOB \
+                +il="${moshi_root}/llm_egs/ft/data/${part}/${ngpu}splits/wav_asr.JOB.lst" \
+                +audio_data_dir="${processed_root}/audio" \
+                +output="${processed_root}/sr_audio"
+        done
+    fi
 
-    #         # Move the processed files to the original directory
-    #         utils/run.pl JOB=1:$ngpu  data/${part}/${ngpu}splits/log/sr.JOB.log \
-    #         python local/audiosr_postprocess.py \
-    #             --input-file data/${part}/${ngpu}splits/wav_seg.JOB.scp \
-    #             --audio-original-root "${processed_root}/audio" \
-    #             --audio-cache-dir "${temp_dir}" \
-    #             --audio-output-dir "${processed_root}/sr_audio"
-            
-    #         rm -rf $temp_dir
-    #         rm data/${part}/${ngpu}splits/wav_seg.*.lst
-    #     done
-    # fi
+    # SE
+    # deepFilter does not support batch processing
+    if [ "${se}" = true ]; then
+        echo "Preprocess: SE with DeepFilter"
+        dir_list=$(find "${processed_root}/sr_audio" -type f -name "*.wav" -exec dirname {} \; | sort -u)
+        for dir in ${dir_list}; do
+            # Filter out the files that have been processed
+            file_list=()
+            for file in $(find "${dir}" -type f -name "*.wav"); do
+                rel_path=$(realpath --relative-to="${processed_root}/sr_audio" "${file}")
+                se_file="${processed_root}/se_audio/${rel_path}"
+                # Filter out the files that have been processed
+                if [ ! -f "${se_file}" ]; then
+                    file_list+=("${file}")
+                fi
+            done
 
-    # # SE
-    # # deepFilter does not support batch processing
-    # if [ "${se}" = true ]; then
-    #     echo "Preprocess: SE with DeepFilter"
-    #     dir_list=$(find "${processed_root}/sr_audio" -type f -name "*.wav" -exec dirname {} \; | sort -u)
-    #     for dir in ${dir_list}; do
-    #         # dertemine output path
-    #         rel_path=$(realpath --relative-to="${processed_root}/sr_audio" "${dir}")
-    #         se_dir="${processed_root}/se_audio/${rel_path}"
-    #         mkdir -p "${se_dir}"
+            # dertemine output path
+            rel_path=$(realpath --relative-to="${processed_root}/sr_audio" "${dir}")
+            se_dir="${processed_root}/se_audio/${rel_path}"
+            mkdir -p "${se_dir}"
 
-    #         deepFilter -i ${dir} -o ${se_dir}
-
-    #         # Rename the processed files
-    #         find "${se_dir}" -type f -name "*DeepFilterNet3*.wav" | while read -r se_file; do
-    #             new_name=$(echo "${se_file}" | sed 's/_DeepFilterNet3//')
-    #             mv "${se_file}" "${new_name}"
-    #         done
-    #     done
-    # fi
+            deepFilter "${file_list[@]}" -o ${se_dir} --no-suffix
+        done
+    fi
 fi
 
-#source activate open-moshi
+# conda activate open-moshi
 if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     echo "Prepare text and audio sequence"
     mkdir -p ${processed_root}/codecs
@@ -188,7 +208,7 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     for part in $valid_set $train_set; do
         utils/run.pl JOB=1:$ngpu  data/${part}/${ngpu}splits/log/tokenize_dump.JOB.log \
         python3 data_scripts/offline_tokenization.py \
-            --input-audio-file data/${part}/${ngpu}splits/wav_seg.JOB.scp \
+            --input-audio-file data/${part}/${ngpu}splits/wav_vad.JOB.scp \
             --input-text-file data/${part}/${ngpu}splits/utt2json.JOB \
             --output-file ${processed_root}/codecs/${part}/${ngpu}splits/codec.JOB.pt \
             --root-dir $processed_root \
