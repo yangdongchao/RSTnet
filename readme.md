@@ -1,7 +1,7 @@
 <img src="RSTnet.png"></img>
 
 
-# RSTnet: Real-time Speech-Text Foundation Model Toolkit
+# RSTnet: Real-time Speech-Text Foundation Model Toolkit (wip)
 Building a real-time speech-text foundation model capable of understanding and generating speech has garnered significant attention. Notable examples of such models include ChatGPT-4o and Moshi. However, challenges in training these models continue to persist in the research community. We introduce RSTnet, a new open-source platform designed for developing real-time speech-text foundation models. RSTnet offers a comprehensive framework for data processing, pre-training, and fine-tuning, aimed at helping researchers build their real-time speech-text models efficiently. It builds upon previous works, such as the real-time spoken dialogue model (Moshi) and the universal audio generation model (UniAudio). RSTnet consists of following key components: (1) Data preparation; (2) streaming audio codec models; (3) speech-text foundation models; (4) Benchmark and Evaluation.
 
 ## News

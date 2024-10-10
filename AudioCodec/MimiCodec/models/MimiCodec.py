@@ -6,7 +6,8 @@ import torch
 from torch import nn
 from modules.seanet import SEANetEncoder, SEANetDecoder
 import modules.transformer as Stransformer
-from quantization.vq import SplitResidualVectorQuantizer
+#from quantization.vq import SplitResidualVectorQuantizer
+from quantization.vq_dc import SplitResidualVectorQuantizer
 from modules.resample import ConvDownsample1d, ConvTrUpsample1d
 import torch
 import torch.nn as nn

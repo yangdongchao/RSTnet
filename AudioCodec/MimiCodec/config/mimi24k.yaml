@@ -78,8 +78,8 @@ criterion:
       mel_loss_weight: 45
       use_feature_match: true
       feat_match_loss_weight: 20
-      use_full_stft_loss: false # Magnitude 
-      use_sub_stft_loss: false  # PQMF loss
+      use_full_stft_loss: true # Magnitude 
+      use_sub_stft_loss: true  # PQMF loss
       full_stft_loss_weight: 1
       sub_stft_loss_weight: 1
       mel_scale_loss:
