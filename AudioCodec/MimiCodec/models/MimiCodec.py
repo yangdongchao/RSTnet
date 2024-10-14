@@ -85,11 +85,11 @@ class MimiCodec(nn.Module):
         """
         mask = torch.rand((audio_data.shape[0])) >= 0.4 # transfer to true or false
         mask = mask.unsqueeze(1).unsqueeze(2).repeat(1, quantizedResult.x.shape[1], quantizedResult.x.shape[2]).to(audio_data.device)
-        z_q = torch.where(mask, quantizedResult.x, z) # 
+        z_q = torch.where(mask.transpose(1,2), quantizedResult.x.transpose(1,2), z)
         z_q = self.upsample(z_q)
         z_q = self.decoder_transformer(z_q)[0]
         rec = self.decoder(z_q)
-        return rec[..., :length], quantizedResult.codes, quantizedResult.penalty, quantizedResult.sim_loss
+        return rec[..., :length], quantizedResult.codes.transpose(1,2), quantizedResult.penalty, quantizedResult.sim_loss
 
     def encode(self, audio_data: torch.Tensor) -> List[torch.Tensor]:
         length = audio_data.shape[-1]
