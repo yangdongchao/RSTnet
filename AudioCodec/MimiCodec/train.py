@@ -21,7 +21,7 @@ from utils.utils import (
     seed_everything, Logger, cal_model_size, load_obj, to_device, is_primary,
     save_checkpoint, scan_checkpoint, plot_spectrogram
 )
-from semantic_features import WavLMFeature
+from semantic_features import WavLMFeature, HuBertFeature
 
 def build_codec_model(config):
     model = eval(config.generator.name)(**config.generator.config)
@@ -40,7 +40,8 @@ def build_semantic_teacher_model(config):
     elif config.semantic_feature_type == 'whisper':
         pass 
     elif config.semantic_feature_type == 'hubert':
-        pass 
+        model = HuBertFeature(ckpt_path=config.semantic_model_path, device=torch.device(f"cuda:{config.local_rank}"))
+        return model
     elif config.semantic_feature_type == 'w2v_bert':
         pass 
     else:
@@ -102,6 +103,8 @@ def main_worker(args):
     ## build model
     codec_model = build_codec_model(args)
     disc_models = build_d_models(args)
+    # import ipdb
+    # ipdb.set_trace()
     semantic_teacher = build_semantic_teacher_model(args)
     logger.log_info("="*10 + f" Codec Model " + "="*10)
     # logger.log_info(codec_model)

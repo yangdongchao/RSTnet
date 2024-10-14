@@ -1,2 +1,3 @@
 from semantic_features.wavlm_feature import WavLMFeature
 from semantic_features.WavLM import WavLM, WavLMConfig
+from semantic_features.hubert_feature import HuBertFeature
