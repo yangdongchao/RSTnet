@@ -190,8 +190,8 @@ class TextTokenizer(AbsTokenizer):
         
 
 if __name__ == "__main__":
-    tx_tokenizer = TextTokenizer('/weka2/home-dongchao/data/checkpoints/meta-llama/Meta-Llama-3-8B')
-    j_data = '/weka2/home-dongchao/data/source/p225_001.json'
+    tx_tokenizer = TextTokenizer('/home-dongchao/data/checkpoints/meta-llama/Meta-Llama-3-8B')
+    j_data = '/home-dongchao/data/source/p225_001.json'
     with open(j_data) as f:
         metadata = json.load(f)
     word_list = tx_tokenizer.tokenize_segment(metadata["segments"])

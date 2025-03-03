@@ -1,8 +1,6 @@
 import os
 import sys
 # # Add MimiCodec to the system path
-sys.path.append('/weka2/home-dongchao/code2/RSTnet_private/MLLM')
-# sys.path.clear()
 
 from omegaconf import OmegaConf
 import torch
@@ -86,7 +84,7 @@ class MimiTokenizer(AbsTokenizer):
 
 if __name__ == '__main__':
     tokenizer = MimiTokenizer(device=torch.device('cuda:0')).cuda()
-    test_wav2 = '/weka2/home-dongchao/data/ESC-50/audio/1-137-A-32.wav'
+    test_wav2 = '/home-dongchao/data/ESC-50/audio/1-137-A-32.wav'
     wav, sr = torchaudio.load(test_wav2)
     if sr != 24000:
         wav = torchaudio.transforms.Resample(sr, 24000)(wav)

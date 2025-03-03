@@ -1,6 +1,6 @@
 import os
 import sys
-sys.path.append('/weka2/home-dongchao/code3/RSTnet_private/MLLM2_11_24')
+sys.path.append('/home-dongchao/code3/RSTnet_private/MLLM2_11_24')
 import os
 import io
 import glob
@@ -19,10 +19,10 @@ class SSLTokenizer(AbsTokenizer):
     def __init__(self, device=torch.device('cpu')):
         super(SSLTokenizer, self).__init__()
         self.device = device
-        model_path = '/weka2/home-dongchao/data/GLM-4-Voice/glm-4-voice-tokenizer'
-        flow_config = '/weka2/home-dongchao/data/GLM-4-Voice/glm-4-voice-decoder/config.yaml'
-        flow_checkpoint = '/weka2/home-dongchao/data/GLM-4-Voice/glm-4-voice-decoder/flow.pt'
-        hift_checkpoint = '/weka2/home-dongchao/data/GLM-4-Voice/glm-4-voice-decoder/hift.pt'
+        model_path = '/home-dongchao/data/GLM-4-Voice/glm-4-voice-tokenizer'
+        flow_config = '/home-dongchao/data/GLM-4-Voice/glm-4-voice-decoder/config.yaml'
+        flow_checkpoint = '/home-dongchao/data/GLM-4-Voice/glm-4-voice-decoder/flow.pt'
+        hift_checkpoint = '/home-dongchao/data/GLM-4-Voice/glm-4-voice-decoder/hift.pt'
         self.model = WhisperVQEncoder.from_pretrained(model_path).eval().to(device)
         self.feature_extractor = WhisperFeatureExtractor.from_pretrained(model_path)
         self._resample_buffer: dict[int, torchaudio.transforms.Resample] = {}
@@ -147,22 +147,4 @@ class SSLTokenizer(AbsTokenizer):
 if __name__ == '__main__':
     pass
     # tokenizer = SSLTokenizer(device=torch.device('cuda:0')).cuda()
-    # test_wav2 = '/weka2/home-dongchao/data/source/p225_001.wav'
-    # test_wav3 = '/weka2/home-dongchao/data/source/p225_002.wav'
-    # # wav, sr = torchaudio.load(test_wav2)
-    # # # if sr != 16000:
-    # # #     wav = torchaudio.transforms.Resample(sr, 16000)(wav)
-    # # #wav = wav.cuda()
-    # codes = tokenizer.extract_speech_token([test_wav2, test_wav3])
-    # for c in codes:
-    #     c = torch.tensor(c)
-    #     print(c.shape)
-    #     wav = tokenizer.detokenize(c.unsqueeze(0).long().cuda())
-    #     torchaudio.save('sound2.wav', wav.detach().cpu(), 16000)
-    #     print('wav ', wav.shape)
-    #     assert 1==2
-    # torchaudio.save('sound1.wav', wav.detach().cpu(), 24000)
-    #pass
-    # assert 1==2
-    # wav = tokenizer.detokenize(codes)
-    # torchaudio.save('sound1.wav', wav, 24000)
+    
