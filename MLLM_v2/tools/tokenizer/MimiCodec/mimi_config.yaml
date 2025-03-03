@@ -1,0 +1,7 @@
+generator:
+  name: MimiCodec
+  config:
+    encoder_rates: [8, 6, 5, 4]
+    codebook_size: 2048
+    codebook_dim: 256
+    rvq_layers: 8

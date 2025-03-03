@@ -1,10 +1,11 @@
 <img src="RSTnet.png"></img>
 
 
-# RSTnet: Real-time Speech-Text Foundation Model Toolkit (wip)
+# RSTnet: Real-time Speech-Text Foundation Model Toolkit (continuing update)
 Building a real-time speech-text foundation model capable of understanding and generating speech has garnered significant attention. Notable examples of such models include ChatGPT-4o and Moshi. However, challenges in training these models continue to persist in the research community. We introduce RSTnet, a new open-source platform designed for developing real-time speech-text foundation models. RSTnet offers a comprehensive framework for data processing, pre-training, and fine-tuning, aimed at helping researchers build their real-time speech-text models efficiently. It builds upon previous works, such as the real-time spoken dialogue model (Moshi) and the universal audio generation model (UniAudio). RSTnet consists of following key components: (1) Data preparation; (2) streaming audio codec models; (3) speech-text foundation models; (4) Benchmark and Evaluation.
 
 ## News
+- [x] 2025.3.4. We release the second version of RSTnet, which supports to pre-training speech-text foundation model. Please refer to MLLM_v2 to find the details.
 - [x] 2024.10.7. We release the first version of RSTnet.
 
 ## Make Contributions
@@ -41,7 +42,14 @@ More details will be updated soon. You can refer to DataPipeline part.
 We plan to support more SOTA streaming audio codec. Now, we have reproduced the MimiCodec.
 
 ## Multi-modal LLM
-We release the fine-tuning code for moshi now. In the next step, we will release the full recipes about pre-training, post-training. Furthermore, we also consider to add other SOTA speech-text foundation paradigms. 
+We have released (1) the fine-tuning code for moshi (2) Pre-training speech-text foundation model recipes, which includes the following advantages:
+
+(1) Supports any LLM backbone, includes LLAMA, Gemma, Mistral, Phi, StableLM, Qwen 
+
+(2) Supports Lora fine-tuning LLM backbone to save the GPU resources
+
+(3) Supports fully training for MLLM if you have ennough GPUs.
+
 
 ## Reference
 The implements of streaming audio codec and speech-text language models are based on previous codebase:
