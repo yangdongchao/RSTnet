@@ -12,7 +12,7 @@ class Text2IDTokenizer(AbsTokenizer):
         
         ckpt_path = "Moshi/ckpts/moshiko-pytorch-bf16/tokenizer_spm_32k_3.model"
         if not os.path.exists(ckpt_path):
-            ckpt_path = hf_hub_download("kyutai/moshiko-pytorch-bf16", "tokenizer-e351c8d8-checkpoint125.safetensors")
+            ckpt_path = hf_hub_download("kyutai/moshiko-pytorch-bf16", "tokenizer_spm_32k_3.model")
         self.model = sentencepiece.SentencePieceProcessor(ckpt_path)  # type: ignore
     
     def get_word_to_subword_mapping(self, tokens):
