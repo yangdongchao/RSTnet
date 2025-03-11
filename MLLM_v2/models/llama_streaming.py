@@ -1,5 +1,6 @@
 # updated by Dongchao
-# we focus on combine llama and local transformer
+# we focus on combine pre-trained LLM and local transformer
+# the designed model is supported CUDA CUDAGraphed. Thus can be used for streaming inference
 # Derived from https://github.com/microsoft/LoRA and Lightning AI. 
 #  ------------------------------------------------------------------------------------------
 
@@ -595,9 +596,12 @@ class GPT(BaseModel, StreamingContainer):
     
     @property
     def text_initial_token_id(self) -> int:
-        """Token id for the start of sequence (text)."""
+        """Token id for the start of sequence (text).
+           Need to be carefully check. For llama3, it can be 128002
+           For Qwen, it can be 151655
+        """
         #"128002": {"content": "<|reserved_special_token_0|>",
-        return 128010  # llama3 tokenizer: reserved tokens from 128002-128255
+        return 151655  # llama3 tokenizer: reserved tokens from 128002-128255
 
     @property
     def initial_token_id(self) -> int:
@@ -674,7 +678,9 @@ class GPT(BaseModel, StreamingContainer):
         sin = self.sin
         input_sequence = sequence
         input_ = None
+        # print('max ', torch.max(sequence))
         for cb_index in range(self.num_audio_codebooks): # 16
+            #print(max(input_sequence[:, cb_index + self.audio_offset]))
             audio_emb = self.input_emb[cb_index](input_sequence[:, cb_index + self.audio_offset]) # different codebook use different layer
             input_ = audio_emb if input_ is None else input_ + audio_emb # using add operation to merge all of the information
         text_emb = self.transformer.wte(input_sequence[:,0])

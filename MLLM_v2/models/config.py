@@ -1,46 +1,86 @@
+
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Optional, Type, Union
+
 import torch
 import yaml
 from typing_extensions import Self
+#from litgpt.utils import find_multiple
+
+def find_multiple(n: int, k: int) -> int:
+    assert k > 0
+    if n % k == 0:
+        return n
+    return n + k - (n % k)
 
 @dataclass
 class Config:
     name: str = ""
     hf_config: dict = field(default_factory=dict)
-    scale_embeddings: bool = False
-    attention_scores_scalar: Optional[int] = None
+    # General size parameters
     block_size: int = 4096
-    sliding_window_size: Optional[int] = None
-    sliding_window_layer_placing: Optional[Literal["all", "interleaved"]] = None
+    n_layer: int = 16
+    n_embd: int = 4096
     vocab_size: int = 50254
     padding_multiple: int = 512
     padded_vocab_size: Optional[int] = None
-    n_layer: int = 16
-    n_head: int = 32
-    head_size: Optional[int] = None
-    n_embd: int = 4096
-    rotary_percentage: float = 0.25
-    parallel_residual: bool = True
-    bias: bool = True
-    lm_head_bias: bool = False
-    n_query_groups: Optional[int] = None
-    shared_attention_norm: bool = False
+    # Transformer block (structure, normalizations)
     norm_class_name: Literal["LayerNorm", "RMSNorm"] = "LayerNorm"
+    norm_eps: float = 1e-5
+    norm_qk: bool = False
     post_attention_norm: bool = False
     post_mlp_norm: bool = False
-    norm_eps: float = 1e-5
+    parallel_residual: bool = True
+    shared_attention_norm: bool = False
+    # Transformer block (self-attention)
+    n_head: int = 32
+    head_size: Optional[int] = None
+    # to use multi-head attention (MHA), set this to `n_head` (default)
+    # to use multi-query attention (MQA), set this to 1
+    # to use grouped-query attention (GQA), set this to a value in between
+    # Example with `n_head=4`
+    # ┌───┐┌───┐┌───┐┌───┐     ┌───┐    ┌───┐             ┌───┐
+    # │ v ││ v ││ v ││ v │     │ v │    │ v │             │ v │
+    # └───┘└───┘└───┘└───┘     └───┘    └───┘             └───┘
+    #   │    │    │    │         │        │                 │
+    # ┌───┐┌───┐┌───┐┌───┐     ┌───┐    ┌───┐             ┌───┐
+    # │ k ││ k ││ k ││ k │     │ k │    │ k │             │ k │
+    # └───┘└───┘└───┘└───┘     └───┘    └───┘             └───┘
+    #   │    │    │    │      ┌──┴──┐  ┌──┴──┐      ┌────┬──┴─┬────┐
+    # ┌───┐┌───┐┌───┐┌───┐  ┌───┐┌───┐┌───┐┌───┐  ┌───┐┌───┐┌───┐┌───┐
+    # │ q ││ q ││ q ││ q │  │ q ││ q ││ q ││ q │  │ q ││ q ││ q ││ q │
+    # └───┘└───┘└───┘└───┘  └───┘└───┘└───┘└───┘  └───┘└───┘└───┘└───┘
+    # ◀──────────────────▶  ◀──────────────────▶  ◀──────────────────▶
+    #         MHA                    GQA                   MQA
+    #   n_query_groups=4       n_query_groups=2      n_query_groups=1
+    #
+    # credit https://arxiv.org/pdf/2305.13245.pdf
+    n_query_groups: Optional[int] = None
+    attn_bias: bool = False
+    attention_scores_scalar: Optional[int] = None
+    sliding_window_size: Optional[int] = None
+    sliding_window_layer_placing: Optional[Literal["all", "interleaved"]] = None
+    # if `attention_logit_softcapping` is used, cannot use optimized
+    # `torch.nn.functional.scaled_dot_product_attention` (which implements
+    # Flash attention), may result in higher memory and runtime footprint.
+    attention_logit_softcapping: Optional[float] = None
+    # Rotary position embedding (RoPE)
+    rope_base: int = 10000
+    rotary_percentage: float = 0.25
+    rope_condense_ratio: int = 1
+    rope_adjustments: Optional[dict] = None
+    # Transformer block (MLP)
+    intermediate_size: Optional[int] = None
+    bias: bool = True
     mlp_class_name: Literal["GptNeoxMLP", "LLaMAMLP", "GemmaMLP", "LLaMAMoE"] = "GptNeoxMLP"
     gelu_approximate: str = "none"
-    intermediate_size: Optional[int] = None
-    rope_condense_ratio: int = 1
-    rope_base: int = 10000
-    rope_adjustments: Optional[dict] = None
     n_expert: int = 0
     n_expert_per_token: int = 0
-    attention_logit_softcapping: Optional[float] = None
+    # GPT before/after blocks
+    scale_embeddings: bool = False
+    lm_head_bias: bool = False
     final_logit_softcapping: Optional[float] = None
 
     def __post_init__(self):
@@ -73,7 +113,7 @@ class Config:
         self.rope_n_elem = int(self.rotary_percentage * self.head_size)
 
         if self.sliding_window_size is not None:
-            self.sliding_window_layer_placing = (
+            self.sliding_window_layer_stride = (
                 1 if (self.sliding_window_layer_placing is None or self.sliding_window_layer_placing == "all") else 2
             )
 
@@ -124,11 +164,20 @@ class Config:
     @property
     def norm_class(self) -> Type:
         # `self.norm_class_name` cannot be the type to keep the config serializable
-        if self.norm_class_name == "RMSNorm":
-            from functools import partial
 
-            from litgpt.model import RMSNorm
+        from functools import partial
+
+        if self.norm_class_name == "RMSNorm":
+            
+            from models.lit_model import RMSNorm
 
             return partial(RMSNorm, add_unit_offset="Gemma" in self.name)
+
+        if self.norm_class_name == "LayerNorm" and "OLMo" in self.name:
+            # this makes it equivalent to `torch.nn.functional.layer_norm`
+            # that is used by OLMo
+            # Table 5 caption in the OLMo paper shows this - https://aclanthology.org/2024.acl-long.841
+            return partial(torch.nn.LayerNorm, elementwise_affine=False)
+
         return getattr(torch.nn, self.norm_class_name)
 
