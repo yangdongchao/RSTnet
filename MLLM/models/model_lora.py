@@ -294,24 +294,21 @@ class LMModel(StreamingContainer):
         global forward: padding a frame. In fact, for casual attention, we donot need mask for attention. We only use it to avoid loss calculation
         """
         B, K, S = sequence.shape  # 
-        #print('sequence ', sequence.shape)
+        
         global_start_frame = self._get_initial_token() # get the 
         global_start_frame = global_start_frame.repeat(B,1,1)
-        #print('global_start_frame ', global_start_frame.shape)
+
         global_input_sequence = torch.cat([global_start_frame, sequence[:,:,:-1]], dim=2) 
         transformer_out, text_logits = self.forward_text(global_input_sequence)
         text_logits = text_logits.squeeze(1) # B, T, D
-        # print('transformer_out ', transformer_out.shape)
-        # print('text_logits ', text_logits.shape)
-        # text_indices = rearrange((text_logits.reshape(-1, text_logits.shape[-1])).max(1)[1], "(b t) -> b t", b=B)
+       
         text_indices = global_input_sequence[:,0,:] # B, T for the training stage, we directly use the gt
-        #print('text_indices ', text_indices.shape)
+        
         local_start_token = self.depformer_text_emb(text_indices) # using text embedding for local start token, B,T,D
-        # print('local_start_token ', local_start_token.shape)
-        local_sequence = global_input_sequence[:,1:self.dep_q+1,:] # B, 8, T
+
+        local_sequence = sequence[:,1:self.dep_q+1,:] # B, 8, T
         audio_logits = self.forward_local(local_start_token, local_sequence, transformer_out) # B, T, 8, card
-        # print('audio_logits ', audio_logits.shape)
-        # print('text_logits ', text_logits.shape)
+
         return audio_logits, text_logits
 
     def forward_local(
@@ -325,33 +322,31 @@ class LMModel(StreamingContainer):
         depformer_input = transformer_out
         local_inputs = []
         local_start_token = local_start_token.reshape(-1, local_start_token.shape[-1]) # transfer to 
-        #print('local_start_token ', local_start_token.shape)
+        
         local_inputs.append(local_start_token)
         different_view_depformer = []
         for cb_index in range(self.dep_q-1): # 7
             local_token_input = self.depformer_emb[cb_index](sequence[:,cb_index:cb_index+1,:]) # get the local embedding, B, 1, T,D
             local_token_input = local_token_input.reshape(-1, local_token_input.shape[-1])
-            #print('local_token_input ', local_token_input.shape)
+
             local_inputs.append(local_token_input) # B*T,D
 
         for cb_index in range(self.dep_q):
             tmp_dep_input = self.depformer_in[cb_index](depformer_input)
-            #print('tmp_dep_input ', tmp_dep_input.shape)
+
             tmp_dep_input = tmp_dep_input.reshape(-1, tmp_dep_input.shape[-1])
-            #print('tmp_dep_input ', tmp_dep_input.shape)
+            
             different_view_depformer.append((tmp_dep_input+local_inputs[cb_index]).unsqueeze(1)) #B*T,1, D
 
         real_depformer_input = torch.cat(different_view_depformer, dim=1) # B*T, 8, D
-        #print('real_depformer_input ', real_depformer_input.shape)
+
         # depformer_input is [B, 1, depformer_dim].
         # The streaming state of the depformer ensures that the proper layer is run.
         dep_output = self.depformer(real_depformer_input) # B*T, 8, D
-        #print('dep_output ', dep_output.shape)
         logits = []
         for depformer_cb_index in range(self.dep_q):
             tmp_logit = self.linears[depformer_cb_index](dep_output[:,depformer_cb_index:depformer_cb_index+1,:]) # B*T,1,card
             tmp_logit = tmp_logit.reshape(B, -1, 1, tmp_logit.shape[-1]) # B, T, 1, card
-            #print('tmp_logit ', tmp_logit.shape)
             logits.append(tmp_logit)
         logits = torch.cat(logits, dim=2)  # B, T, 8, card
         assert logits.dim() == 4, logits.shape  # ?
@@ -367,7 +362,6 @@ class LMModel(StreamingContainer):
         ), f"Sequence shape {sequence.shape} must match the number of codebooks."
         input_sequence = sequence
         input_ = None
-        #print('self.num_audio_codebooks ', self.num_audio_codebooks)
         for cb_index in range(self.num_audio_codebooks): # 16
             audio_emb = self.emb[cb_index](
                 input_sequence[:, cb_index + self.audio_offset] # start from 1
@@ -375,9 +369,7 @@ class LMModel(StreamingContainer):
             input_ = audio_emb if input_ is None else input_ + audio_emb # using add operation to merge all of the information
         text_emb = self.text_emb(input_sequence[:, 0]) # encode the text information
         input_ = text_emb if input_ is None else input_ + text_emb # similarly, add the information
-        #print('input_ e ', input_.shape)
         transformer_out = self.transformer(input_)
-        #print('transformer_out ', transformer_out.shape)
         if self.out_norm:
             transformer_out = self.out_norm(transformer_out)
         assert isinstance(transformer_out, torch.Tensor)
