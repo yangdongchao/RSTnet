@@ -48,8 +48,9 @@ def main(args):
                 session = json.load(f)
                 for itm in session["segments"]:
                     speaker_id = int(itm["speaker"].split("_")[-1])
-                    text += f"[{speaker_id}]{itm['text']}"
-                
+                    text += f" [{speaker_id}]{itm['text']}"
+            
+            text = text.strip()
             ids = text_tokenizer.tokenize_text(text)
             ids = torch.Tensor(ids).to(torch.int32)
             data_dict[name] = ids

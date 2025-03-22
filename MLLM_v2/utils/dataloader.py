@@ -587,10 +587,10 @@ if __name__ == "__main__":
     for i, batch in enumerate(train_iter):
         if i > 10:
             break
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         print(batch)
     for i, batch in enumerate(valid_iter):
         if i > 10:
             break
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         print(batch)

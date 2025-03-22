@@ -1,6 +1,7 @@
-stage=3
-stop_stage=3
+stage=0
+stop_stage=7
 ngpu=2
+
 db_root=/mnt/users/hccl.local/jkzhao/data/fisher
 processed_metadata_root=/mnt/users/hccl.local/jkzhao/projects/RSTnet/debug_data
 processed_audio_root=/mnt/users/hccl.local/jkzhao/projects/RSTnet/debug_data_processed
