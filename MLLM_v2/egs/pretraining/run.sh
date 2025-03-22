@@ -22,7 +22,6 @@ seed=999
 
 batch_scale=2000
 learning_rate=0.0001
-tag="test"
 
 ### stage 1-5: data preparation ###
 for part in $test_sets $valid_set $train_set; do

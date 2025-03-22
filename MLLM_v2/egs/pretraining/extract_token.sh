@@ -1,3 +1,27 @@
+# Below we need splitted:
+# tar.scp
+  # name WebDataset[{__key__, json{speaker_id, transcript}, wav}]
+# or wav.scp
+  # name wav_path
+
+# So that we yields:
+# 1. tar_info.scp
+  # name
+# 2. text.scp
+  # name text
+# 3. utt2spk.scp
+  # name spk
+# 4. semantic_codec.pt
+  # {name: torch.Tensor(int16)[T]}, with SSLTokenizer
+
+# 5. text.pt
+  # {name: token_ids[torch.Tensor(int32)]}
+
+# And finally packed into:
+# 1. asr_data.json
+# Format: setence_level_text_audio_interleaved
+# {keys: {test_seq: text.pt, audio_seq: semantic_codec.pt}}
+
 . ./path.sh
 
 stage=2
@@ -65,20 +89,6 @@ fi
 
 
 if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
-    echo "Prepare text sequence"
-    ngpu=16
-    for part in $train_set; do
-        utils/run.pl JOB=1:$ngpu  /home-dongchao/exp/MLLM/MLS/val/16splits_2/log/text_bpe.JOB.log \
-        python  data_scripts/text_tokenization_scp.py \
-            --rank JOB \
-            --input-file  /home-dongchao/exp/MLLM/MLS/val/16splits_2/text.JOB.scp \
-            --checkpoint_dir /home-dongchao/data/checkpoints/meta-llama/Llama-3.2-3B  \
-            --output-file /home-dongchao/exp/MLLM/MLS/val/16splits_2/text.JOB.pt
-    done
-    
-fi
-
-if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     echo "extract MLS tokens"
     for part in $train_set; do
     # for part in $valid_set; do
@@ -97,7 +107,25 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     done
 fi
 
+if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
+    echo "Prepare text sequence"
+    ngpu=16
+    for part in $train_set; do
+        utils/run.pl JOB=1:$ngpu  /home-dongchao/exp/MLLM/MLS/val/16splits_2/log/text_bpe.JOB.log \
+        python  data_scripts/text_tokenization_scp.py \
+            --rank JOB \
+            --input-file  /home-dongchao/exp/MLLM/MLS/val/16splits_2/text.JOB.scp \
+            --checkpoint_dir /home-dongchao/data/checkpoints/meta-llama/Llama-3.2-3B  \
+            --output-file /home-dongchao/exp/MLLM/MLS/val/16splits_2/text.JOB.pt
+    done
+    
+fi
 
+# Below for streaming version, not TTS
+# 6. text_align.pt
+  # {name: padded_text_tokens: [1, T]}
+# 7. audio_align.pt
+  # {name: audio_tokens: [8, T]}, with MimiCodec
 
 if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
     echo "extract alignment libriheavy tokens $train_set"
