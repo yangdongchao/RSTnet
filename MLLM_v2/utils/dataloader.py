@@ -574,4 +574,23 @@ def get_data_iterator_tokenizer_vocabulary(
     return train_iterator, valid_iterator
 
 if __name__ == "__main__":
-    get_data_iterator_tokenizer_vocabulary(sys.argv[1:2], sys.argv[2:3], n_worker=1) 
+    from utils.arguments import get_args
+    from utils.train_utils import find_data_jsons
+    args = get_args()
+    train_iter, valid_iter = get_data_iterator_tokenizer_vocabulary(
+        args, 
+        find_data_jsons(args.train_data_jsons, rank=0, world_size=1), 
+        find_data_jsons(args.valid_data_jsons, rank=0, world_size=1), 
+        n_worker=1
+        )
+    
+    for i, batch in enumerate(train_iter):
+        if i > 10:
+            break
+        import pdb; pdb.set_trace()
+        print(batch)
+    for i, batch in enumerate(valid_iter):
+        if i > 10:
+            break
+        import pdb; pdb.set_trace()
+        print(batch)

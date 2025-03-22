@@ -11,10 +11,10 @@ import librosa
 from io import BytesIO
 import io
 from tools.tokenizer.MimiCodec.mimi_tokenizer import MimiTokenizer
-from tools.tokenizer.GLM4V.semantic import SSLTokenizer
+# from tools.tokenizer.GLM4V.semantic import SSLTokenizer
 import json
 import soundfile as sf
-import webdataset as wds
+# import webdataset as wds
 import torchaudio
 
 def get_parser():
@@ -86,11 +86,14 @@ def main(args):
                 key, value_path = line[0], " ".join(line[1:])
                 audio_data, sample_rate = sf.read(value_path)
                 wav = torch.from_numpy(audio_data).unsqueeze(0).float()
-                utts = [(wav, sample_rate)]
-                values = tokenizer.tokenize(utts)
-                for i_r, value in enumerate(values):
-                    value = torch.tensor(value).to(torch.int16)
-                    data_dict[key] = value
+                # utts = [(wav, sample_rate)]
+                # values = tokenizer.tokenize(utts)
+                # for i_r, value in enumerate(values):
+                #     value = torch.tensor(value).to(torch.int16)
+                #     data_dict[key] = value
+                value = tokenizer.tokenize(wav, sample_rate)
+                data_dict[key] = value
+                # print(value.shape)
                 s_cnt += 1
                 if i > 0 and i % 1000 == 0:
                     logging.info(f"processed {s_cnt} examples")

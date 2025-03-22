@@ -1,0 +1,9 @@
+**/__pycache__/
+*.pyc
+processed/
+speech_data/
+*.pt
+data/
+ckpts/
+debug_data/
+debug_data_processed/
