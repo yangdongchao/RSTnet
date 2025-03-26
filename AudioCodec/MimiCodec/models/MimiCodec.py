@@ -105,7 +105,7 @@ class MimiCodec(nn.Module):
         import time
         st_time = time.time()
         z_q = self.quantizer.decode(codes)
-        z_q = self.upsample(z_q)
+        z_q = self.upsample(z_q.transpose(1,2))
         z_q = self.decoder_transformer(z_q)[0]
         rec = self.decoder(z_q)
         return rec
