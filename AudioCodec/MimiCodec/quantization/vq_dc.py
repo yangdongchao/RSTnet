@@ -156,9 +156,9 @@ class SplitResidualVectorQuantizer(nn.Module):
     def decode(self, codes: torch.Tensor) -> torch.Tensor:
         """Decode the given codes to the quantized representation."""
         # codes is [B, K, T], with T frames, K nb of codebooks.
-        quantized = self.rvq_first.get_codes_from_indices(codes[:, : self.n_q_semantic])
+        quantized=self.rvq_first.get_output_from_indices(codes[:, : ,:self.n_q_semantic])
         if codes.shape[1] > self.n_q_semantic:
-            quantized += self.rvq_rest.get_codes_from_indices(codes[:, self.n_q_semantic :])
+            quantized+=self.rvq_rest.get_output_from_indices(codes[:,: ,self.n_q_semantic :])
         return quantized
 
     @property
